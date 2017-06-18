@@ -17,7 +17,7 @@ public class DownloadDiffExample {
 //         This is your api key, make sure you use it in all your tests.
         eyes.setApiKey(System.getenv("Applitools_ApiKey"));
         try {
-            // Start visual testing with browser viewport set to 1000x600.
+            // Start visual testing with browser viewport set to 800x600.
             // Make sure to use the returned driver from this point on.
             eyes.open(driver, "Hello World!", "My first Selenium Java test!", new RectangleSize(800, 600));
 
