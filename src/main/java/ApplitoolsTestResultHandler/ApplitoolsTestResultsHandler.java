@@ -1,3 +1,5 @@
+package ApplitoolsTestResultHandler;
+
 import com.applitools.eyes.TestResults;
 import com.sun.glass.ui.Size;
 import org.apache.commons.io.FileUtils;

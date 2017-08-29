@@ -1,3 +1,5 @@
+import ApplitoolsTestResultHandler.ApplitoolsTestResultsHandler;
+import ApplitoolsTestResultHandler.ResultStatus;
 import com.applitools.eyes.RectangleSize;
 import com.applitools.eyes.TestResults;
 import com.applitools.eyes.selenium.Eyes;
