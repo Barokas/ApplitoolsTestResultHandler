@@ -26,10 +26,13 @@ import java.util.regex.Pattern;
 
 public class ApplitoolsTestResultsHandler {
 
+    private static final String VERSION = "1.1.0";
     private static final String STEP_RESULT_API_FORMAT = "/api/sessions/batches/%s/%s/?ApiKey=%s&format=json";
     private static final String RESULT_REGEX = "(?<serverURL>^.+)\\/app\\/batches\\/(?<batchId>\\d+)\\/(?<sessionId>\\d+).*$";
     private static final String IMAGE_TMPL = "%s/step %s %s-%s.png";
     private static final int DEFAULT_TIME_BETWEEN_FRAMES = 500;
+    private static final String DiffsUrlTemplate = "%s/api/sessions/batches/%s/%s/steps/%s/diff?ApiKey=%s";
+
 
     private String applitolsViewKey;
     private String serverURL;
@@ -38,8 +41,11 @@ public class ApplitoolsTestResultsHandler {
     private TestResults testResults;
     private String[] stepsNames;
     private ResultStatus[] stepsState;
+    private JSONObject testData;
+    private String prefix="";
 
     private String preparePath(String Path){
+        Path+="/"+prefix;
         if (!Path.contains("/"+batchID+"/"+sessionID)) {
             Path = Path + "/" + batchID + "/" + sessionID;
             File folder = new File(Path);
@@ -58,17 +64,25 @@ public class ApplitoolsTestResultsHandler {
         this.batchID = matcher.group("batchId");
         this.sessionID = matcher.group("sessionId");
         this.serverURL = matcher.group("serverURL");
+
+        String url = String.format(serverURL + STEP_RESULT_API_FORMAT, this.batchID, this.sessionID, this.applitolsViewKey);
+        String json = readJsonStringFromUrl(url);
+        this.testData = new JSONObject(json);
+
         this.stepsNames= calculateStepsNames();
         this.stepsState= prepareStepResults();
+
     }
 
     private URL[] getDiffUrls() {
         URL[] urls = new URL[stepsState.length];
-        String urlTemplate = serverURL + "/api/sessions/%s/steps/%s/diff?ApiKey=%s";
+//        String urlTemplate = serverURL + "/api/sessions/%s/steps/%s/diff?ApiKey=%s";
+//        String urlTemplate = serverURL + "/api/sessions/batches/%s/%s/steps/%s/diff?ApiKey=%s";
+
         for (int step = 0; step < this.testResults.getSteps(); ++step) {
             if (stepsState[step] == ResultStatus.FAILED) {
                 try {
-                    urls[step] = new URL(String.format(urlTemplate, this.sessionID, step + 1, this.applitolsViewKey));
+                    urls[step] = new URL(String.format(DiffsUrlTemplate,this.serverURL, this.batchID,this.sessionID, step + 1, this.applitolsViewKey));
                 } catch (MalformedURLException e) {
                     e.printStackTrace();
                 }
@@ -86,13 +100,18 @@ public class ApplitoolsTestResultsHandler {
         return stepsState;
     }
 
-    private ResultStatus[] prepareStepResults() throws Exception {
-        String url = String.format(serverURL + STEP_RESULT_API_FORMAT, this.batchID, this.sessionID, this.applitolsViewKey);
-        String json = readJsonStringFromUrl(url);
 
-        JSONObject obj = new JSONObject(json);
-        JSONArray expected = obj.getJSONArray("expectedAppOutput");
-        JSONArray actual = obj.getJSONArray("actualAppOutput");
+    public String getLinkToStep(int step){
+
+        String link = testResults.getUrl().replaceAll("batches","sessions");
+        StringBuffer buf = new StringBuffer(link);
+        int index =link.indexOf("?accountId=");
+        return (buf.insert(index,"/steps/"+step).toString());
+    }
+
+    private ResultStatus[] prepareStepResults() throws Exception {
+        JSONArray expected = this.testData.getJSONArray("expectedAppOutput");
+        JSONArray actual = this.testData.getJSONArray("actualAppOutput");
 
         int steps = Math.max(expected.length(), actual.length());
         ResultStatus[] retStepResults = new ResultStatus[steps];
@@ -118,18 +137,14 @@ public class ApplitoolsTestResultsHandler {
     }
 
     private String[] calculateStepsNames() throws Exception {
-        String url = String.format(serverURL + STEP_RESULT_API_FORMAT, this.batchID, this.sessionID, this.applitolsViewKey);
-        String json = readJsonStringFromUrl(url);
         ResultStatus[] stepResults= calculateStepResults();
-
-        JSONObject obj = new JSONObject(json);
-        JSONArray expected = obj.getJSONArray("expectedAppOutput");
-        JSONArray actual = obj.getJSONArray("actualAppOutput");
+        JSONArray expected = this.testData.getJSONArray("expectedAppOutput");
+        JSONArray actual = this.testData.getJSONArray("actualAppOutput");
         int steps= expected.length();
         String[] StepsNames = new String[steps];
 
         for (int i = 0; i < steps; i++) {
-            if (stepResults[i]!=ResultStatus.NEW) {
+            if (stepResults[i]!= ResultStatus.NEW) {
                 StepsNames[i] = expected.getJSONObject(i).optString("tag");
             }
             else {
@@ -172,8 +187,8 @@ public class ApplitoolsTestResultsHandler {
     }
 
     public void downloadImages(String path) throws Exception {
-        downloadBaselineImages(preparePath(path));
-        downloadCurrentImages(preparePath(path));
+        downloadBaselineImages(path);
+        downloadCurrentImages(path);
     }
 
     private void saveImagesInFolder(String path, String imageType, URL[] imageURLS) throws InterruptedException, IOException, JSONException {
@@ -486,7 +501,34 @@ public class ApplitoolsTestResultsHandler {
         }
     }
 
+    public void SetPathPrefixStructure(String pathPrefix){
+        pathPrefix= pathPrefix.replaceAll("TestName",this.getTestName());
+        pathPrefix= pathPrefix.replaceAll("AppName",this.getAppName());
+        pathPrefix= pathPrefix.replaceAll("viewport",this.getViewportSize());
+        pathPrefix= pathPrefix.replaceAll("hostingOS",this.getHostingOS());
+        pathPrefix= pathPrefix.replaceAll("hostingApp",this.getHostingApp());
+        prefix = pathPrefix;
+    }
 
+    public String getTestName(){
+        return this.testData.getJSONObject("startInfo").optString("scenarioIdOrName");
+    }
+    public String getAppName(){
+        return this.testData.getJSONObject("startInfo").optString("appIdOrName");
+    }
+
+    public String getViewportSize() {
+        return this.testData.getJSONObject("startInfo").getJSONObject("environment").getJSONObject("displaySize").optString("width").toString()+"x"+this.testData.getJSONObject("startInfo").getJSONObject("environment").getJSONObject("displaySize").optString("height").toString();
+    }
+
+    public String getHostingOS() {
+        return this.testData.getJSONObject("startInfo").getJSONObject("environment").optString("os");
+
+    }
+    public String getHostingApp() {
+        return this.testData.getJSONObject("startInfo").getJSONObject("environment").optString("hostingApp");
+
+    }
 
 }
 

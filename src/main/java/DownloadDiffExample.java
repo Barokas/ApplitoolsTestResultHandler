@@ -33,15 +33,31 @@ public class DownloadDiffExample {
             // Visual checkpoint #2.
             eyes.checkWindow("Click!");
 
-//             End visual testing. Validate visual correctness.
+            // End visual testing. Validate visual correctness.
             TestResults testResult= eyes.close(false);
+
+            //Link to batch result.
+            System.out.println("This is the link for the Batch Result: "+testResult.getUrl());
+
             ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult,System.getenv("Applitools_ViewKey"));
-            testResultHandler.downloadImages(System.getenv("PathToDownloadImages"));
+
+            // Optional Setting this prefix will determine the structure of the repository for the downloaded images.
+            testResultHandler.SetPathPrefixStructure("TestName/AppName/viewport/hostingOS/hostingApp");
+
+            //Link to test/step result
+            System.out.println("This is the url to the first step " +testResultHandler.getLinkToStep(1));
+
+            testResultHandler.downloadImages(System.getenv("PathToDownloadImages"));                // Download both the Baseline and the Current images to the folder specified in Path.
+//            testResultHandler.downloadBaselineImages(System.getenv("PathToDownloadImages"));      // Download only the Baseline images to the folder specified in Path.
+//            testResultHandler.downloadCurrentImages(System.getenv("PathToDownloadImages"));       // Download only the Current images to the folder specified in Path.
+            testResultHandler.downloadDiffs(System.getenv("PathToDownloadImages"));                 // Download Diffs to the folder specified in Path.
+            testResultHandler.downloadAnimateGiff(System.getenv("PathToDownloadImages"));           // Download Animated GIf to the folder specified in Path.
+
+//            Get Steps Names
             String[] names = testResultHandler.getStepsNames();
+
+//            Get the status of each step (Pass / Fail / New / Missing).
             ResultStatus[] results = testResultHandler.calculateStepResults();
-            testResultHandler.downloadDiffs(System.getenv("PathToDownloadImages"));
-            testResultHandler.downloadAnimateGiff(System.getenv("PathToDownloadImages"));  // option one - Default Time between Frames is 500 MS
-//            testResultHandler.downloadAnimateGiff(System.getenv("PathToDownloadImages"),300); // option two.
         }
 
         finally {
