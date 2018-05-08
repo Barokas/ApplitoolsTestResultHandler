@@ -398,11 +398,7 @@ public class ApplitoolsTestResultsHandler {
                     if (null != response)
                         response.close();
                 }
-
-
-//Before
-                //   FileUtils.copyURLToFile(imageURLS[i], new File(String.format(IMAGE_TMPL, path, (i+1),windowsCompatibleStepName, imageType)));
-//After
+                
             }
         }
     }
