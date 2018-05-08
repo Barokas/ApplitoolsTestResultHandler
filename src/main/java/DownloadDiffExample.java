@@ -48,8 +48,8 @@ public class DownloadDiffExample {
             //Link to batch result.
             System.out.println("This is the link for the Batch Result: "+testResult.getUrl());
 
-            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"));
-//            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"),"ProxyServerURL","ProxyServerPort");
+//            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"));
+            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"),"94.41.15.153","3128");
 //            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"),"ProxyServerURL","ProxyServerPort","ProxyServerUserName","ProxyServerPassword");
 
             List<BufferedImage>  base = testResultHandler.getBaselineBufferedImages();  // get Baseline Images as BufferedImage

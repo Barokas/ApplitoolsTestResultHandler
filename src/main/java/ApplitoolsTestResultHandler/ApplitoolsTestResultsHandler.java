@@ -373,13 +373,13 @@ public class ApplitoolsTestResultsHandler {
         }
     }
 
-
     private void saveImagesInFolder(String path, String imageType, URL[] imageURLS) throws InterruptedException, IOException, JSONException {
         for (int i = 0; i < imageURLS.length; i++) {
             if (imageURLS[i] == null) {
                 System.out.println("No " + imageType + " image in step " + (i + 1) + ": " + stepsNames[i]);
             } else {
                 String windowsCompatibleStepName = makeWindowsFileNameCompatible(stepsNames[i]);
+
                 CloseableHttpResponse response = null;
                 HttpGet get = new HttpGet(imageURLS[i].toString());
                 CloseableHttpClient client = getCloseableHttpClient();
@@ -515,13 +515,24 @@ public class ApplitoolsTestResultsHandler {
 
     private String getSessionInfo(String sessionId, String batchId) throws IOException {
         URL url = new URL(String.format("%s/api/sessions/batches/%s/%s?apiKey=%s&format=json", this.serverURL, batchId, sessionId, this.applitolsViewKey));
-        InputStream stream = url.openStream();
+
+        HttpGet get = new HttpGet(url.toString());
+        CloseableHttpClient client = getCloseableHttpClient();
+
+        CloseableHttpResponse response = null;
+        response = client.execute(get);
+        InputStream stream = response.getEntity().getContent();
 
         try {
             BufferedReader rd = new BufferedReader(new InputStreamReader(stream, Charset.forName("UTF-8")));
             return readAll(rd);
         } finally {
-            stream.close();
+            if (null != stream)
+                stream.close();
+            if (null != client)
+                client.close();
+            if (null != response)
+                response.close();
         }
     }
 
