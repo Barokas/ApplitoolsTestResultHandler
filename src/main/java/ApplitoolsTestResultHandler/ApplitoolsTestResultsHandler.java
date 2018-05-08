@@ -352,6 +352,7 @@ public class ApplitoolsTestResultsHandler {
 
     private void saveImagesInFolder(String path, String imageType) {
         List<BufferedImage> imagesList = null;
+        ResultStatus[] resultStatus = this.calculateStepResults();
 
         if (imageType == "Current")
             imagesList = this.currentImages;
@@ -362,13 +363,19 @@ public class ApplitoolsTestResultsHandler {
 
         if (null != imagesList) {
             for (int i = 0; i < imagesList.size(); i++) {
-                String windowsCompatibleStepName = makeWindowsFileNameCompatible(stepsNames[i]);
-                File outputfile = new File(String.format(IMAGE_TMPL, path, (i + 1), windowsCompatibleStepName, imageType));
-                try {
-                    ImageIO.write(imagesList.get(i), "jpg", outputfile);
-                } catch (IOException e) {
-                    e.printStackTrace();
+                if (null!=imagesList.get(i)){
+                    String windowsCompatibleStepName = makeWindowsFileNameCompatible(stepsNames[i]);
+                    File outputfile = new File(String.format(IMAGE_TMPL, path, (i + 1), windowsCompatibleStepName, imageType));
+                    try {
+                        ImageIO.write(imagesList.get(i), "jpg", outputfile);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                 }
+                else{
+                    System.out.println("No "+imageType+" image was downloaded at step " +(i+1)+ "as this step status is "+resultStatus[i]);
+                }
+
             }
         }
     }
