@@ -300,12 +300,6 @@ public class ApplitoolsTestResultsHandler {
                             response.close();
                     }
 
-
-//                    try {
-//                        images.add(ImageIO.read(urls[i])); // TODO
-//                    } catch (IOException e) {
-//                        e.printStackTrace();
-//                    }
                 } else {
                     images.add(null);
                 }
