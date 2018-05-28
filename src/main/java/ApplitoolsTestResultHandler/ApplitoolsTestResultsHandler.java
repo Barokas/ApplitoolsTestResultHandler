@@ -398,7 +398,7 @@ public class ApplitoolsTestResultsHandler {
                     if (null != response)
                         response.close();
                 }
-                
+
             }
         }
     }
@@ -741,11 +741,11 @@ public class ApplitoolsTestResultsHandler {
     }
 
     public String getTestName() throws JSONException {
-        return this.testData.getJSONObject("startInfo").optString("scenarioIdOrName");
+        return this.testData.getJSONObject("startInfo").optString("scenarioName");
     }
 
     public String getAppName() throws JSONException {
-        return this.testData.getJSONObject("startInfo").optString("appIdOrName");
+        return this.testData.getJSONObject("startInfo").optString("appName");
     }
 
     public String getViewportSize() throws JSONException {
