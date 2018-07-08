@@ -13,7 +13,7 @@
         <dependency>
             <groupId>com.applitools</groupId>
             <artifactId>eyes-selenium-java3</artifactId>
-            <version>3.11</version>
+            <version>RELEASE</version>
         </dependency>
         <dependency>
             <groupId>org.json</groupId>

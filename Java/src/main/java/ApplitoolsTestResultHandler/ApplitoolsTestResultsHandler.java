@@ -62,6 +62,10 @@ public class ApplitoolsTestResultsHandler {
     protected HttpHost proxy = null;
     protected CredentialsProvider credsProvider = null;
 
+    public TestResults getTestResults() {
+        return testResults;
+    }
+
     private TestResults testResults;
     private String[] stepsNames;
     private ResultStatus[] stepsState;
@@ -107,7 +111,7 @@ public class ApplitoolsTestResultsHandler {
 
         String url = String.format(serverURL + STEP_RESULT_API_FORMAT, this.batchID, this.sessionID, this.applitolsViewKey);
         String json = readJsonStringFromUrl(url);
-        this.testData = new JSONObject(json);
+            this.testData = new JSONObject(json);
         this.stepsNames = calculateStepsNames();
         this.stepsState = prepareStepResults();
 
