@@ -14,7 +14,7 @@ class ResultStatus(Enum):
     MISSINIG = 'missing'
 
 
-class ApplitoolsTestResultsHandler2:
+class ApplitoolsTestResultsHandler:
     def _get_session_id(self, testResults):
         pattern = '^' + re.escape(self.server_URL) + '\/app\/batches\/\d+\/(?P<sessionId>\d+).*$'
         return re.findall(pattern, testResults.url)[0]
