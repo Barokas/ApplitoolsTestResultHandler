@@ -27,8 +27,8 @@ public class DownloadDiffExample {
         eyes.setServerUrl(new URI("https://test2eyes.applitools.com/"));
 
 //         This is your api key, make sure you use it in all your tests.
-//        eyes.setApiKey(System.getenv("Applitools_ApiKey"));
-        eyes.setApiKey("hLwIWfqtOvM3SwDSt99WzzYcbCxzB9E81K9101oVof8PMM110");
+        eyes.setApiKey(System.getenv("Applitools_ApiKey"));
+       
 
         try {
             // Start visual testing with browser viewport set to 800x600.
@@ -55,8 +55,7 @@ public class DownloadDiffExample {
             //Link to batch result.
             System.out.println("This is the link for the Batch Result: "+testResult.getUrl());
 
-//            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"));
-            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, "c79NlSh9yMv2FJO4TGhaQ5MBi9WKZ111kmczYl7o7ZATQ110");
+            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"));
 //            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"),"ProxyServerURL","ProxyServerPort");
 //            ApplitoolsTestResultsHandler testResultHandler = new ApplitoolsTestResultsHandler(testResult, System.getenv("Applitools_ViewKey"),"ProxyServerURL","ProxyServerPort","ProxyServerUserName","ProxyServerPassword");
 
