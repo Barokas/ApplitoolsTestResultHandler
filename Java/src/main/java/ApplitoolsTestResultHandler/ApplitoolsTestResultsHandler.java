@@ -1,33 +1,7 @@
 package ApplitoolsTestResultHandler;
 
-import java.awt.image.BufferedImage;
-import java.awt.image.RenderedImage;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.net.*;
-import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import javax.imageio.IIOException;
-import javax.imageio.IIOImage;
-import javax.imageio.ImageIO;
-import javax.imageio.ImageTypeSpecifier;
-import javax.imageio.ImageWriteParam;
-import javax.imageio.ImageWriter;
-import javax.imageio.metadata.IIOMetadata;
-import javax.imageio.metadata.IIOMetadataNode;
-import javax.imageio.stream.FileImageOutputStream;
-import javax.imageio.stream.ImageOutputStream;
-import javax.net.ssl.HttpsURLConnection;
-
+import com.applitools.eyes.TestResults;
+import com.sun.glass.ui.Size;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.Credentials;
@@ -35,6 +9,8 @@ import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
@@ -42,8 +18,23 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import com.applitools.eyes.TestResults;
-import com.sun.glass.ui.Size;
+import javax.imageio.*;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.stream.FileImageOutputStream;
+import javax.imageio.stream.ImageOutputStream;
+import javax.net.ssl.HttpsURLConnection;
+import java.awt.image.BufferedImage;
+import java.awt.image.RenderedImage;
+import java.io.*;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ApplitoolsTestResultsHandler {
 
@@ -53,18 +44,21 @@ public class ApplitoolsTestResultsHandler {
     private static final String IMAGE_TMPL = "%s/step %s %s-%s.png";
     private static final int DEFAULT_TIME_BETWEEN_FRAMES = 500;
     private static final String DiffsUrlTemplate = "%s/api/sessions/batches/%s/%s/steps/%s/diff?ApiKey=%s";
+    private static final String UPDATE_SESSIONS = "/api/sessions/batches/%s/updates";
+    private static final String UPDATE_SESSIONS_BASELINES = "/api/sessions/batches/%s/baselines";
 
-    protected String applitolsViewKey;
+
+    protected String applitoolsRunKey;
+    protected String applitoolsViewKey;
+    protected String applitoolsWriteKey;
     protected String serverURL;
     protected String batchID;
     protected String sessionID;
+    protected String accountID;
+
 
     protected HttpHost proxy = null;
     protected CredentialsProvider credsProvider = null;
-
-    public TestResults getTestResults() {
-        return testResults;
-    }
 
     private TestResults testResults;
     private String[] stepsNames;
@@ -87,7 +81,7 @@ public class ApplitoolsTestResultsHandler {
     private List<BufferedImage> currentImages;
     private List<BufferedImage> diffImages;
 
-    public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey, String ProxyServer, String ProxyPort, String ProxyUser, String ProxyPassword) throws Exception {
+    public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey, String ProxyServer, String ProxyPort, String ProxyUser, String ProxyPassword, String RunKey, String WriteKey) throws Exception {
 
         if ((ProxyServer != "") && (ProxyPort != "")) {
             proxy = new HttpHost(ProxyServer, Integer.parseInt(ProxyPort));
@@ -100,7 +94,9 @@ public class ApplitoolsTestResultsHandler {
             credsProvider.setCredentials(authScope, credentials);
         }
 
-        this.applitolsViewKey = viewkey;
+        this.applitoolsViewKey = viewkey;
+        this.applitoolsRunKey = RunKey;
+        this.applitoolsWriteKey = WriteKey;
         this.testResults = testResults;
         Pattern pattern = Pattern.compile(RESULT_REGEX);
         Matcher matcher = pattern.matcher(testResults.getUrl());
@@ -108,25 +104,36 @@ public class ApplitoolsTestResultsHandler {
         this.batchID = matcher.group("batchId");
         this.sessionID = matcher.group("sessionId");
         this.serverURL = matcher.group("serverURL");
+        String accountIdParamName = "accountId=";
+        this.accountID = testResults.getUrl().substring(testResults.getUrl().indexOf(accountIdParamName) + accountIdParamName.length());
 
-        String url = String.format(serverURL + STEP_RESULT_API_FORMAT, this.batchID, this.sessionID, this.applitolsViewKey);
+        String url = String.format(serverURL + STEP_RESULT_API_FORMAT, this.batchID, this.sessionID, this.applitoolsViewKey);
         String json = readJsonStringFromUrl(url);
-            this.testData = new JSONObject(json);
+        this.testData = new JSONObject(json);
         this.stepsNames = calculateStepsNames();
         this.stepsState = prepareStepResults();
-
         this.baselineImages = getBufferdImagesByType("Baseline");
         this.currentImages = getBufferdImagesByType("Current");
         this.diffImages = getBufferdImagesByType("Diff");
 
     }
 
-    public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey, String ProxyServer, String ProxyPort) throws Exception {
-        this(testResults, viewkey, ProxyServer, ProxyPort, "", "");
+    public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey, String ProxyServer, String ProxyPort, String RunKey, String WriteKey) throws Exception {
+        this(testResults, viewkey, ProxyServer, ProxyPort, "", "", RunKey, WriteKey);
     }
 
-    public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey) throws Exception {
-        this(testResults, viewkey, "", "");
+    public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey, String RunKey, String WriteKey) throws Exception {
+        this(testResults, viewkey, "", "", RunKey, WriteKey);
+    }
+
+    public void acceptChanges(List<ResultStatus> desiredStatuses)
+    {
+        try {
+            acceptChangesToSteps(this.stepsState, desiredStatuses);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
     }
 
     private URL[] getDiffUrls() {
@@ -134,7 +141,7 @@ public class ApplitoolsTestResultsHandler {
         for (int step = 0; step < this.testResults.getSteps(); ++step) {
             if ((stepsState[step] == ResultStatus.UNRESOLVED) || (stepsState[step] == ResultStatus.FAILED)) {
                 try {
-                    urls[step] = new URL(String.format(DiffsUrlTemplate, this.serverURL, this.batchID, this.sessionID, step + 1, this.applitolsViewKey));
+                    urls[step] = new URL(String.format(DiffsUrlTemplate, this.serverURL, this.batchID, this.sessionID, step + 1, this.applitoolsViewKey));
                 } catch (MalformedURLException e) {
                     e.printStackTrace();
                 }
@@ -180,6 +187,29 @@ public class ApplitoolsTestResultsHandler {
             }
         }
         return retStepResults;
+    }
+
+    private void acceptChangesToSteps(ResultStatus[] results, List<ResultStatus> desiredStatuses) throws Exception {
+        int sizeResultStatus = results.length;
+        for (int i=0; i< sizeResultStatus; i++ )
+        {
+            if(desiredStatuses.contains(results[i]))
+            {
+                String url = String.format(serverURL + UPDATE_SESSIONS, this.batchID);
+                url = url + "?apiKey=" + this.applitoolsWriteKey;
+
+                String payload = String.format("{\"updates\":[{\"id\":\"%s\",\"batchId\":\"%s\",\"stepUpdates\":[{\"index\":%d,\"replaceExpected\":true}]}]}",
+                        this.sessionID, this.batchID, i);
+
+                String json = postJsonToURL(url, payload);
+                url = String.format(serverURL + UPDATE_SESSIONS_BASELINES, this.batchID);
+                url = url + "?accountId=" + this.accountID+ "&apiKey=" + this.applitoolsViewKey;
+                payload = String.format("{\"ids\":[\"%s\"]}",
+                        this.sessionID);
+                json = postJsonToURL(url, payload);
+            }
+        }
+
     }
 
     private ResultStatus checkStepIfFailedOrUnresolved(int i) throws JSONException {
@@ -260,6 +290,35 @@ public class ApplitoolsTestResultsHandler {
                 response.close();
         }
     }
+
+private String postJsonToURL(String url, String payload) throws Exception {
+
+    HttpsURLConnection.setDefaultSSLSocketFactory(new sun.security.ssl.SSLSocketFactoryImpl());
+    CloseableHttpResponse response = null;
+    HttpPost post = new HttpPost(url);
+
+    post.setHeader("Accept", "application/json");
+    post.setHeader("Content-Type", "application/json");
+
+    StringEntity entity = new StringEntity(payload, "application/json", "utf-8");
+    post.setEntity(entity);
+
+    CloseableHttpClient client = getCloseableHttpClient();
+
+    response = client.execute(post);
+    InputStream is = response.getEntity().getContent();
+    try {
+        BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
+        return readAll(rd);
+    } finally {
+        if (null != is)
+            is.close();
+        if (null != client)
+            client.close();
+        if (null != response)
+            response.close();
+    }
+}
 
     protected String readAll(Reader rd) throws IOException {
         StringBuilder sb = new StringBuilder();
@@ -432,7 +491,7 @@ public class ApplitoolsTestResultsHandler {
             if (imageIds[i] == null) {
                 URLS[i] = null;
             } else try {
-                URLS[i] = new URL(String.format("%s/api/images/%s?apiKey=%s", this.serverURL, imageIds[i], this.applitolsViewKey, this.applitolsViewKey));
+                URLS[i] = new URL(String.format("%s/api/images/%s?apiKey=%s", this.serverURL, imageIds[i], this.applitoolsViewKey, this.applitoolsViewKey));
             } catch (MalformedURLException e) {
                 e.printStackTrace();
             }
@@ -515,7 +574,7 @@ public class ApplitoolsTestResultsHandler {
     }
 
     private String getSessionInfo(String sessionId, String batchId) throws IOException {
-        URL url = new URL(String.format("%s/api/sessions/batches/%s/%s?apiKey=%s&format=json", this.serverURL, batchId, sessionId, this.applitolsViewKey));
+        URL url = new URL(String.format("%s/api/sessions/batches/%s/%s?apiKey=%s&format=json", this.serverURL, batchId, sessionId, this.applitoolsViewKey));
 
         HttpGet get = new HttpGet(url.toString());
         CloseableHttpClient client = getCloseableHttpClient();
