@@ -203,7 +203,7 @@ public class ApplitoolsTestResultsHandler {
 
                 String json = postJsonToURL(url, payload);
                 url = String.format(serverURL + UPDATE_SESSIONS_BASELINES, this.batchID);
-                url = url + "?accountId=" + this.accountID+ "&apiKey=" + this.applitoolsViewKey;
+                url = url + "?accountId=" + this.accountID+ "&apiKey=" + this.applitoolsWriteKey;
                 payload = String.format("{\"ids\":[\"%s\"]}",
                         this.sessionID);
                 json = postJsonToURL(url, payload);
