@@ -2,18 +2,19 @@ package ApplitoolsTestResultHandler;
 
 import com.applitools.eyes.TestResults;
 import com.sun.glass.ui.Size;
-import org.apache.http.HttpHost;
+import org.apache.http.*;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.Credentials;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.*;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.message.BasicHeader;
+import org.apache.http.protocol.HTTP;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -30,9 +31,8 @@ import java.io.*;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.text.SimpleDateFormat;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,6 +46,12 @@ public class ApplitoolsTestResultsHandler {
     private static final String DiffsUrlTemplate = "%s/api/sessions/batches/%s/%s/steps/%s/diff?ApiKey=%s";
     private static final String UPDATE_SESSIONS = "/api/sessions/batches/%s/updates";
     private static final String UPDATE_SESSIONS_BASELINES = "/api/sessions/batches/%s/baselines";
+    private static final int RETRY_REQUEST_INTERVAL = 500; // ms
+    private static final int LONG_REQUEST_DELAY_MS = 2000; // ms
+    private static final int MAX_LONG_REQUEST_DELAY_MS = 10000; // ms
+    private static final int DEFAULT_TIMEOUT_MS = 300000; // ms (5 min)
+    private static final int REDUCED_TIMEOUT_MS = 15000; // ms (15 sec)
+    private static final double LONG_REQUEST_DELAY_MULTIPLICATIVE_INCREASE_FACTOR = 1.5;
 
 
     protected String applitoolsRunKey;
@@ -81,6 +87,9 @@ public class ApplitoolsTestResultsHandler {
     private List<BufferedImage> currentImages;
     private List<BufferedImage> diffImages;
 
+    private int counter = 0;
+
+
     public ApplitoolsTestResultsHandler(TestResults testResults, String viewkey, String ProxyServer, String ProxyPort, String ProxyUser, String ProxyPassword, String RunKey, String WriteKey) throws Exception {
 
         if ((ProxyServer != "") && (ProxyPort != "")) {
@@ -112,9 +121,9 @@ public class ApplitoolsTestResultsHandler {
         this.testData = new JSONObject(json);
         this.stepsNames = calculateStepsNames();
         this.stepsState = prepareStepResults();
-        this.baselineImages = getBufferdImagesByType("Baseline");
-        this.currentImages = getBufferdImagesByType("Current");
-        this.diffImages = getBufferdImagesByType("Diff");
+        this.baselineImages = getBufferedImagesByType("Baseline");
+        this.currentImages = getBufferedImagesByType("Current");
+        this.diffImages = getBufferedImagesByType("Diff");
 
     }
 
@@ -126,8 +135,7 @@ public class ApplitoolsTestResultsHandler {
         this(testResults, viewkey, "", "", RunKey, WriteKey);
     }
 
-    public void acceptChanges(List<ResultStatus> desiredStatuses)
-    {
+    public void acceptChanges(List<ResultStatus> desiredStatuses) {
         try {
             acceptChangesToSteps(this.stepsState, desiredStatuses);
         } catch (Exception e) {
@@ -191,10 +199,8 @@ public class ApplitoolsTestResultsHandler {
 
     private void acceptChangesToSteps(ResultStatus[] results, List<ResultStatus> desiredStatuses) throws Exception {
         int sizeResultStatus = results.length;
-        for (int i=0; i< sizeResultStatus; i++ )
-        {
-            if(desiredStatuses.contains(results[i]))
-            {
+        for (int i = 0; i < sizeResultStatus; i++) {
+            if (desiredStatuses.contains(results[i])) {
                 String url = String.format(serverURL + UPDATE_SESSIONS, this.batchID);
                 url = url + "?apiKey=" + this.applitoolsWriteKey;
 
@@ -203,7 +209,7 @@ public class ApplitoolsTestResultsHandler {
 
                 String json = postJsonToURL(url, payload);
                 url = String.format(serverURL + UPDATE_SESSIONS_BASELINES, this.batchID);
-                url = url + "?accountId=" + this.accountID+ "&apiKey=" + this.applitoolsWriteKey;
+                url = url + "?accountId=" + this.accountID + "&apiKey=" + this.applitoolsWriteKey;
                 payload = String.format("{\"ids\":[\"%s\"]}",
                         this.sessionID);
                 json = postJsonToURL(url, payload);
@@ -275,8 +281,7 @@ public class ApplitoolsTestResultsHandler {
         HttpGet get = new HttpGet(url);
 
         CloseableHttpClient client = getCloseableHttpClient();
-
-        response = client.execute(get);
+        response = runLongRequest(get);
         InputStream is = response.getEntity().getContent();
         try {
             BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
@@ -291,34 +296,37 @@ public class ApplitoolsTestResultsHandler {
         }
     }
 
-private String postJsonToURL(String url, String payload) throws Exception {
+    private String postJsonToURL(String url, String payload) throws Exception {
 
-    HttpsURLConnection.setDefaultSSLSocketFactory(new sun.security.ssl.SSLSocketFactoryImpl());
-    CloseableHttpResponse response = null;
-    HttpPost post = new HttpPost(url);
+        HttpsURLConnection.setDefaultSSLSocketFactory(new sun.security.ssl.SSLSocketFactoryImpl());
+        CloseableHttpResponse response = null;
+//    HttpResponse response = null;
+        HttpPost post = new HttpPost(url);
 
-    post.setHeader("Accept", "application/json");
-    post.setHeader("Content-Type", "application/json");
+        post.setHeader("Accept", "application/json");
+        post.setHeader("Content-Type", "application/json");
 
-    StringEntity entity = new StringEntity(payload, "application/json", "utf-8");
-    post.setEntity(entity);
+        StringEntity entity = new StringEntity(payload, "application/json", "utf-8");
+        post.setEntity(entity);
 
-    CloseableHttpClient client = getCloseableHttpClient();
+        CloseableHttpClient client = getCloseableHttpClient();
 
-    response = client.execute(post);
-    InputStream is = response.getEntity().getContent();
-    try {
-        BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
-        return readAll(rd);
-    } finally {
-        if (null != is)
-            is.close();
-        if (null != client)
-            client.close();
-        if (null != response)
-            response.close();
+        response = runLongRequest(post);
+
+        InputStream is = response.getEntity().getContent();
+        try {
+            BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
+            return readAll(rd);
+
+        } finally {
+            if (null != is)
+                is.close();
+            if (null != client)
+                client.close();
+            if (null != response)
+                response.close();
+        }
     }
-}
 
     protected String readAll(Reader rd) throws IOException {
         StringBuilder sb = new StringBuilder();
@@ -329,7 +337,7 @@ private String postJsonToURL(String url, String payload) throws Exception {
         return sb.toString();
     }
 
-    private ArrayList<BufferedImage> getBufferdImagesByType(String type) throws IOException, JSONException {
+    private ArrayList<BufferedImage> getBufferedImagesByType(String type) throws IOException, JSONException, InterruptedException {
         URL[] urls = null;
         ArrayList<BufferedImage> images = new ArrayList<BufferedImage>();
 
@@ -348,7 +356,7 @@ private String postJsonToURL(String url, String payload) throws Exception {
                     CloseableHttpResponse response = null;
                     HttpGet get = new HttpGet(urls[i].toString());
                     CloseableHttpClient client = getCloseableHttpClient();
-                    response = client.execute(get);
+                    response = runLongRequest(get);
                     InputStream is = response.getEntity().getContent();
                     try {
                         images.add(ImageIO.read(is));
@@ -420,7 +428,7 @@ private String postJsonToURL(String url, String payload) throws Exception {
 
         if (null != imagesList) {
             for (int i = 0; i < imagesList.size(); i++) {
-                if (null!=imagesList.get(i)){
+                if (null != imagesList.get(i)) {
                     String windowsCompatibleStepName = makeWindowsFileNameCompatible(stepsNames[i]);
                     File outputfile = new File(String.format(IMAGE_TMPL, path, (i + 1), windowsCompatibleStepName, imageType));
                     try {
@@ -428,9 +436,8 @@ private String postJsonToURL(String url, String payload) throws Exception {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                }
-                else{
-                    System.out.println("No "+imageType+" image was downloaded at step " +(i+1)+ "as this step status is "+resultStatus[i]);
+                } else {
+                    System.out.println("No " + imageType + " image was downloaded at step " + (i + 1) + "as this step status is " + resultStatus[i]);
                 }
 
             }
@@ -448,7 +455,7 @@ private String postJsonToURL(String url, String payload) throws Exception {
                 HttpGet get = new HttpGet(imageURLS[i].toString());
                 CloseableHttpClient client = getCloseableHttpClient();
 
-                response = client.execute(get);
+                response = runLongRequest(get);
                 InputStream is = response.getEntity().getContent();
                 try {
                     BufferedImage bi = ImageIO.read(is);
@@ -511,7 +518,7 @@ private String postJsonToURL(String url, String payload) throws Exception {
         String sessionInfo = null;
         try {
             sessionInfo = getSessionInfo(sessionId, batchId);
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
         JSONObject obj = new JSONObject(sessionInfo);
@@ -546,7 +553,7 @@ private String postJsonToURL(String url, String payload) throws Exception {
 
         if (testResults.getMismatches() + testResults.getMatches() > 0) // only if the test isn't new and not all of his steps are missing
         {
-            URL[] baselienImagesURL = getBaselineImagesURLS();
+            URL[] baselineImagesURLS = getBaselineImagesURLS();
             URL[] currentImagesURL = getCurrentImagesURLS();
             URL[] diffImagesURL = getDiffUrls();
 
@@ -555,11 +562,11 @@ private String postJsonToURL(String url, String payload) throws Exception {
             List<BufferedImage> diff = getDiffsBufferedImages();     // get Diff Images as BufferedImage
 
             for (int i = 0; i < stepsState.length; i++) {
-                if ((stepsState[i] == ResultStatus.UNRESOLVED)||(stepsState[i] == ResultStatus.FAILED)) {
+                if ((stepsState[i] == ResultStatus.UNRESOLVED) || (stepsState[i] == ResultStatus.FAILED)) {
                     List<BufferedImage> list = new ArrayList<BufferedImage>();
                     try {
                         if (currentImagesURL[i] != null) list.add(curr.get(i));
-                        if (baselienImagesURL[i] != null) list.add(base.get(i));
+                        if (baselineImagesURLS[i] != null) list.add(base.get(i));
                         if (diffImagesURL[i] != null) list.add(diff.get(i));
                         String tempPath = preparePath(path) + "/" + (i + 1) + " - AnimatedGiff.gif";
                         createAnimatedGif(list, new File(tempPath), timeBetweenFramesMS);
@@ -573,14 +580,15 @@ private String postJsonToURL(String url, String payload) throws Exception {
         }
     }
 
-    private String getSessionInfo(String sessionId, String batchId) throws IOException {
+    private String getSessionInfo(String sessionId, String batchId) throws IOException, InterruptedException {
         URL url = new URL(String.format("%s/api/sessions/batches/%s/%s?apiKey=%s&format=json", this.serverURL, batchId, sessionId, this.applitoolsViewKey));
 
         HttpGet get = new HttpGet(url.toString());
         CloseableHttpClient client = getCloseableHttpClient();
 
         CloseableHttpResponse response = null;
-        response = client.execute(get);
+//        response = client.execute(get);
+        response = runLongRequest(get);
         InputStream stream = response.getEntity().getContent();
 
         try {
@@ -823,6 +831,105 @@ private String postJsonToURL(String url, String payload) throws Exception {
     public String getHostingApp() throws JSONException {
         return this.testData.getJSONObject("startInfo").getJSONObject("environment").optString("hostingApp");
     }
+
+    public CloseableHttpResponse runLongRequest(HttpRequestBase apiCall) throws InterruptedException {
+        HttpRequestBase requestBase = createHttpRequest(apiCall);
+        CloseableHttpResponse response = sendRequest(requestBase, 1, false);
+        return longRequestCheckStatus(response);
+    }
+
+    public CloseableHttpResponse sendRequest(HttpRequestBase apiCall, int retry, boolean delayBeforeRetry) throws InterruptedException {
+        counter += 1;
+        String requestId = counter + "--" + UUID.randomUUID();
+        apiCall.addHeader("x-applitools-eyes-client-request-id", requestId);
+        CloseableHttpClient client = HttpClientBuilder.create().build();
+        CloseableHttpResponse response;
+
+        try {
+            response = client.execute(apiCall);
+            return response;
+        } catch (Exception e) {
+            String errorMessage = "error message: " + e.getMessage();
+            System.out.println(errorMessage);
+
+            if (retry > 0) {
+                if (delayBeforeRetry) {
+                    Thread.sleep(RETRY_REQUEST_INTERVAL);
+                    return sendRequest(apiCall, retry - 1, delayBeforeRetry);
+                }
+                return sendRequest(apiCall, retry - 1, delayBeforeRetry);
+            }
+            throw new Error(errorMessage);
+        }
+
+
+    }
+
+    public CloseableHttpResponse longRequestCheckStatus(CloseableHttpResponse responseReceived) throws InterruptedException {
+
+        int status = responseReceived.getStatusLine().getStatusCode();
+        HttpRequestBase response = null;
+        String URI;
+
+        switch (status) {
+            case HttpStatus.SC_OK:
+                return responseReceived;
+
+            case HttpStatus.SC_ACCEPTED:
+                URI = responseReceived.getFirstHeader("Location").getValue() + "?apiKey=" + this.applitoolsViewKey;
+                response = new HttpGet(URI);
+                response = createHttpRequest(response);
+                CloseableHttpResponse requestResponse = longRequestLoop(response, LONG_REQUEST_DELAY_MS);
+                return longRequestCheckStatus(requestResponse);
+            case HttpStatus.SC_CREATED:
+                URI = responseReceived.getFirstHeader("Location").getValue() + "?apiKey=" + this.applitoolsViewKey;
+                response = new HttpDelete(URI);
+                return sendRequest(response, 1, false);
+            case HttpStatus.SC_GONE:
+                throw new Error("The server task is gone");
+            default:
+                throw new Error("Unknown error during long request: " + responseReceived.getStatusLine());
+        }
+    }
+
+    public CloseableHttpResponse longRequestLoop(HttpRequestBase options, int delay) throws InterruptedException {
+        delay = (int) Math.min(
+                MAX_LONG_REQUEST_DELAY_MS,
+                Math.floor(delay * LONG_REQUEST_DELAY_MULTIPLICATIVE_INCREASE_FACTOR));
+        System.out.println("Still running... Retrying in " + delay);
+
+        Thread.sleep(delay);
+        CloseableHttpResponse response = sendRequest(options, 1, false);
+        if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
+            return response;
+        }
+        return longRequestLoop(options, delay);
+    }
+
+
+
+    public HttpRequestBase createHttpRequest(HttpRequestBase apiCall) {
+
+        Calendar calendar = Calendar.getInstance();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz");
+        dateFormat.setTimeZone(TimeZone.getTimeZone("GMT"));
+        String RFC1123_formatted_current_client_time = dateFormat.format(calendar.getTime());
+        try {
+            if (this.proxy != null) {
+                RequestConfig requestConfig = RequestConfig.custom()
+                        .setProxy(this.proxy)
+                        .build();
+                apiCall.setConfig(requestConfig);
+            }
+            apiCall.addHeader("Eyes-Expect", "202+location");
+            apiCall.addHeader("Eyes-Date", RFC1123_formatted_current_client_time);
+            return apiCall;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
 
 }
 
