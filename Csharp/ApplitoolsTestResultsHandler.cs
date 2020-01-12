@@ -4,6 +4,9 @@ using Newtonsoft.Json.Linq;
 using System.Text.RegularExpressions;
 using System.Net;
 using System.IO;
+using System.Net.Http;
+using System.Threading;
+using System.Collections.Generic;
 
 namespace ApplitoolsTestResultsHandler
 {
@@ -27,17 +30,22 @@ namespace ApplitoolsTestResultsHandler
         private RESULT_STATUS[] stepsResult;
         private JObject testJson;
         private string prefix;
+        private int counter;
 
         // Json keys
         private const string START_INFO = "startInfo";
-        private const string SCENARIO_NAME = "scenarioIdOrName";
-        private const string APP_NAME = "appIdOrName";
+        private const string SCENARIO_NAME = "scenarioName";
+        private const string APP_NAME = "appName";
         private const string ENVIRONMENT = "environment";
         private const string DISPLAY_SIZE = "displaySize";
         private const string HEIGHT = "height";
         private const string WIDTH = "width";
         private const string OS = "os";
         private const string HOSTING_APP = "hostingApp";
+        private const int RETRY_REQUEST_INTERVAL = 500; //ms
+        private const int LONG_REQUEST_DELAY_MS = 2000; // ms
+        private const int MAX_LONG_REQUEST_DELAY_MS = 10000; // ms
+        private const double LONG_REQUEST_DELAY_MULTIPLICATIVE_INCREASE_FACTOR = 1.5;
 
         public ApplitoolsTestResultsHandler(string viewKey, TestResults testResult)
         {
@@ -48,6 +56,7 @@ namespace ApplitoolsTestResultsHandler
             setsessionID(testResult);
             setTestJson();
             setStepResults();
+            counter = 0;
         }
 
         public RESULT_STATUS[] calculateStepResults()
@@ -78,7 +87,6 @@ namespace ApplitoolsTestResultsHandler
         public void downloadDiffs(string Path)
         {
             RESULT_STATUS[] stepStates = this.stepsResult;
-            WebClient webClient = new WebClient();
             int countDiffs = 0;
             for (int i = 0; i < stepStates.Length; ++i)
             {
@@ -91,7 +99,14 @@ namespace ApplitoolsTestResultsHandler
                     }
                     string filePath = Path + "/diff_step_" + (i + 1).ToString() + ".jpg";
                     string download_image_URL = this.ServerURL + "/api/sessions/batches/" + this.batchID + "/" + this.sessionID + "/steps/" + (i + 1).ToString() + "/diff?apiKey=" + this.ViewKey;
-                    webClient.DownloadFile(download_image_URL, filePath);
+
+                    HttpResponseMessage response = runLongRequest(download_image_URL);
+                    var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    response.Content.CopyToAsync(fs).ContinueWith(
+                    (copyTask) =>
+                    {
+                        fs.Close();
+                    });
                 }
                 else
                 {
@@ -116,7 +131,6 @@ namespace ApplitoolsTestResultsHandler
          */
         public void downloadBaselineImages(string Path)
         {
-            WebClient webClient = new WebClient();
             string URL = "";
             string FullPath = "";
             int counterForBaseline = 0;
@@ -134,7 +148,14 @@ namespace ApplitoolsTestResultsHandler
                 FullPath = Path + "/baseline_step_" + (i + 1).ToString() + ".jpg";
                 try
                 {
-                    webClient.DownloadFile(URL, FullPath);
+                    HttpResponseMessage response = runLongRequest(URL);
+
+                    var fs = new FileStream(FullPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    response.Content.CopyToAsync(fs).ContinueWith(
+                    (copyTask) =>
+                    {
+                        fs.Close();
+                    });
                 }
                 catch
                 {
@@ -143,13 +164,117 @@ namespace ApplitoolsTestResultsHandler
             }
         }
 
+        private HttpResponseMessage runLongRequest(string URL)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, URL);
+            var requestGet = createHttpRequest(request);
+
+            HttpResponseMessage response = sendRequest(requestGet, 1, false);
+
+            return longRequestCheckStatus(response);
+        }
+
+        private HttpResponseMessage sendRequest(HttpRequestMessage request, int retry, Boolean delayBeforeRetry)
+        {
+            counter += 1;
+            string requestId = counter + "--" + System.Guid.NewGuid().ToString("B").ToUpper();
+
+            request.Headers.Add("x-applitools-eyes-client-request-id", requestId);
+
+            HttpClient client = new HttpClient();
+
+            try
+            {
+                HttpResponseMessage response = client.SendAsync(request).Result;
+                return response;
+            }
+            catch (Exception e)
+            {
+                String errorMessage = "error message: " + e.Message;
+                Console.Write(errorMessage);
+
+                if (retry > 0)
+                {
+                    if (delayBeforeRetry)
+                    {
+                        Thread.Sleep(RETRY_REQUEST_INTERVAL);
+                    }
+                    return sendRequest(request, retry - 1, delayBeforeRetry);
+                }
+                throw new ThreadInterruptedException(errorMessage);
+            }
+        }
+
+        public HttpResponseMessage longRequestCheckStatus(HttpResponseMessage responseReceived)
+        {
+            HttpStatusCode status = responseReceived.StatusCode;
+
+
+            HttpRequestMessage request = null;
+            String URI;
+
+            switch (status)
+            {
+                case HttpStatusCode.OK:
+                    return responseReceived;
+
+                case HttpStatusCode.Accepted:
+                    List<string> locationList1 = (List<string>)responseReceived.Headers.GetValues("Location");
+                    URI = locationList1[0] + "?apiKey=" + this.ViewKey;
+                    request = new HttpRequestMessage(HttpMethod.Get, URI);
+                    request = createHttpRequest(request);
+                    HttpResponseMessage response = longRequestLoop(request, LONG_REQUEST_DELAY_MS);
+                    return longRequestCheckStatus(response);
+
+                case HttpStatusCode.Created:
+                    List<string> locationList2 = (List<string>)responseReceived.Headers.GetValues("Location");
+                    URI = locationList2[0] + "?apiKey=" + this.ViewKey;
+                    request = new HttpRequestMessage(HttpMethod.Delete, URI);
+                    return sendRequest(request, 1, false);
+
+                case HttpStatusCode.Gone:
+                    throw new ThreadInterruptedException("The server task is gone");
+
+                default:
+                    throw new ThreadInterruptedException("Unknown error during long request: " + status);
+            }
+        }
+
+        private HttpRequestMessage createHttpRequest(HttpRequestMessage request)
+        {
+            request.Headers.Add("Eyes-Expect", "202+location");
+            request.Headers.Add("Eyes-Date", getCurrentTimeRFC1123());
+            return request;
+        }
+
+        private string getCurrentTimeRFC1123()
+        {
+            DateTime now = DateTime.Now;
+            return now.ToString("R"); //The R specifier creates an RFC1123 date and time pattern.
+        }
+
+        public HttpResponseMessage longRequestLoop(HttpRequestMessage request, int delay)
+        {
+            delay = (int)Math.Min(MAX_LONG_REQUEST_DELAY_MS, Math.Floor(delay * LONG_REQUEST_DELAY_MULTIPLICATIVE_INCREASE_FACTOR));
+            Console.Write("Still running... Retrying in " + delay);
+
+            Thread.Sleep(delay);
+
+            HttpResponseMessage response = sendRequest(request, 1, false);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return response;
+            }
+            return longRequestLoop(request, delay);
+        }
+
         /**
         *     @brief   Downloads the current images
         *     @param   Path     The path in which the images will be saved
         */
         public void downloadCurrentImages(string Path)
         {
-            WebClient webClient = new WebClient();
+            //WebClient webClient = new WebClient();
             string URL = "";
             string FullPath = "";
             int counterForCurrent = 0;
@@ -167,7 +292,13 @@ namespace ApplitoolsTestResultsHandler
                 FullPath = Path + "/actual_step_" + (i + 1).ToString() + ".jpg";
                 try
                 {
-                    webClient.DownloadFile(URL, FullPath);
+                    HttpResponseMessage response = runLongRequest(URL);
+                    var fs = new FileStream(FullPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    response.Content.CopyToAsync(fs).ContinueWith(
+                    (copyTask) =>
+                    {
+                        fs.Close();
+                    });
                 }
                 catch
                 {
@@ -191,11 +322,14 @@ namespace ApplitoolsTestResultsHandler
          *  @brief  Returns the value of the test name from the json
          *  @returns    String value representing the test name
          */
-        private string getTestName() {
-            try {
+        private string getTestName()
+        {
+            try
+            {
                 return this.testJson[START_INFO][SCENARIO_NAME].ToString();
             }
-            catch {
+            catch
+            {
                 return "TestName";
             }
         }
@@ -301,7 +435,7 @@ namespace ApplitoolsTestResultsHandler
                 bool folderExists = Directory.Exists(path);
                 if (!folderExists)
                 {
-                    Directory.CreateDirectory(path);  
+                    Directory.CreateDirectory(path);
                 }
             }
             return path;
